@@ -176,9 +176,14 @@ impl<T: IEip712 + StorageType> Erc20Permit<T> {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use alloy_primitives::{uint, Address, B256, U256};
-    use motsu::prelude::{Account, Contract};
-    use stylus_sdk::{block, prelude::*};
+    use alloy_signer::SignerSync;
+    use motsu::prelude::*;
+    use stylus_sdk::{
+        alloy_primitives::{uint, Address, B256, U256},
+        alloy_sol_types::sol,
+        block,
+        prelude::*,
+    };
 
     use super::{
         ERC2612ExpiredSignature, ERC2612InvalidSigner, Erc20, Erc20Permit,
@@ -186,7 +191,7 @@ mod tests {
     };
     use crate::utils::cryptography::{
         ecdsa::{self, recover, sign_message},
-        eip712::{Eip712Helper, IEip712},
+        eip712::{self, IEip712},
     };
 
     #[storage]
@@ -247,10 +252,16 @@ mod tests {
 
     unsafe impl TopLevelStorage for Erc20PermitExample {}
 
+    // Saturday, 1 January 2000 00:00:00
+    const EXPIRED_DEADLINE: U256 = uint!(946_684_800_U256);
+
+    // Wednesday, 1 January 3000 00:00:00
+    const FAIR_DEADLINE: U256 = uint!(32_503_680_000_U256);
+
     // Helper function to create a permit signature
     fn create_permit_signature(
         contract: &Contract<Erc20PermitExample>,
-        signer: &Account,
+        account: &Account,
         owner: Address,
         spender: Address,
         value: U256,
@@ -269,22 +280,14 @@ mod tests {
             )));
 
         // Get the domain separator from the contract
-        let domain_separator = contract.sender(*signer).domain_separator();
+        let domain_separator = contract.sender(account).domain_separator();
 
         // Create the final hash to sign
-        let message_hash = alloy_primitives::keccak256(
-            [
-                &[0x19, 0x01][..],
-                domain_separator.as_slice(),
-                struct_hash.as_slice(),
-            ]
-            .concat(),
-        );
+        let message_hash =
+            eip712::to_typed_data_hash(&domain_separator, &struct_hash);
 
-        // Sign the message (in a real test we would use a private key, but for
-        // motsu tests we can simulate) Note: In a real implementation,
-        // we would use ecdsa::sign with a real private key
-        let signature = sign_message(message_hash, signer.address()).unwrap();
+        let signature =
+            account.signer().sign_message_sync(message_hash.into()).unwrap();
 
         (signature.0, signature.1, signature.2)
     }
