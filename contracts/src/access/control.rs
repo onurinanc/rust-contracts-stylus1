@@ -45,10 +45,10 @@ use alloy_primitives::{Address, FixedBytes, B256};
 use openzeppelin_stylus_proc::interface_id;
 pub use sol::*;
 use stylus_sdk::{
+    call::MethodError,
     evm, msg,
     prelude::*,
     storage::{StorageBool, StorageFixedBytes, StorageMap},
-    stylus_proc::{public, SolidityError},
 };
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -105,6 +105,12 @@ pub enum Error {
     UnauthorizedAccount(AccessControlUnauthorizedAccount),
     /// The caller of a afunction is not the expected one.
     BadConfirmation(AccessControlBadConfirmation),
+}
+
+impl MethodError for Error {
+    fn encode(self) -> alloc::vec::Vec<u8> {
+        self.into()
+    }
 }
 
 /// State of a [`RoleData`] contract.
