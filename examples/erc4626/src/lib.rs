@@ -13,7 +13,7 @@ use openzeppelin_stylus::{
     utils::introspection::erc165::IErc165,
 };
 use stylus_sdk::{
-    alloy_primitives::{Address, FixedBytes, U256, U8},
+    alloy_primitives::{aliases::B32, Address, U256, U8},
     prelude::*,
 };
 
@@ -49,15 +49,15 @@ impl IErc4626 for Erc4626Example {
         self.erc4626.asset()
     }
 
-    fn total_assets(&mut self) -> Result<U256, Self::Error> {
+    fn total_assets(&self) -> Result<U256, Self::Error> {
         self.erc4626.total_assets()
     }
 
-    fn convert_to_shares(&mut self, assets: U256) -> Result<U256, Self::Error> {
+    fn convert_to_shares(&self, assets: U256) -> Result<U256, Self::Error> {
         self.erc4626.convert_to_shares(assets, &self.erc20)
     }
 
-    fn convert_to_assets(&mut self, shares: U256) -> Result<U256, Self::Error> {
+    fn convert_to_assets(&self, shares: U256) -> Result<U256, Self::Error> {
         self.erc4626.convert_to_assets(shares, &self.erc20)
     }
 
@@ -65,7 +65,7 @@ impl IErc4626 for Erc4626Example {
         self.erc4626.max_deposit(receiver)
     }
 
-    fn preview_deposit(&mut self, assets: U256) -> Result<U256, Self::Error> {
+    fn preview_deposit(&self, assets: U256) -> Result<U256, Self::Error> {
         self.erc4626.preview_deposit(assets, &self.erc20)
     }
 
@@ -81,7 +81,7 @@ impl IErc4626 for Erc4626Example {
         self.erc4626.max_mint(receiver)
     }
 
-    fn preview_mint(&mut self, shares: U256) -> Result<U256, Self::Error> {
+    fn preview_mint(&self, shares: U256) -> Result<U256, Self::Error> {
         self.erc4626.preview_mint(shares, &self.erc20)
     }
 
@@ -93,11 +93,11 @@ impl IErc4626 for Erc4626Example {
         self.erc4626.mint(shares, receiver, &mut self.erc20)
     }
 
-    fn max_withdraw(&mut self, owner: Address) -> Result<U256, Self::Error> {
+    fn max_withdraw(&self, owner: Address) -> Result<U256, Self::Error> {
         self.erc4626.max_withdraw(owner, &self.erc20)
     }
 
-    fn preview_withdraw(&mut self, assets: U256) -> Result<U256, Self::Error> {
+    fn preview_withdraw(&self, assets: U256) -> Result<U256, Self::Error> {
         self.erc4626.preview_withdraw(assets, &self.erc20)
     }
 
@@ -114,7 +114,7 @@ impl IErc4626 for Erc4626Example {
         self.erc4626.max_redeem(owner, &self.erc20)
     }
 
-    fn preview_redeem(&mut self, shares: U256) -> Result<U256, Self::Error> {
+    fn preview_redeem(&self, shares: U256) -> Result<U256, Self::Error> {
         self.erc4626.preview_redeem(shares, &self.erc20)
     }
 
@@ -187,7 +187,7 @@ impl IErc20Metadata for Erc4626Example {
 
 #[public]
 impl IErc165 for Erc4626Example {
-    fn supports_interface(&self, interface_id: FixedBytes<4>) -> bool {
+    fn supports_interface(&self, interface_id: B32) -> bool {
         <Self as IErc4626>::interface_id() == interface_id
             || self.erc20.supports_interface(interface_id)
             || self.metadata.supports_interface(interface_id)

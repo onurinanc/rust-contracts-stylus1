@@ -12,9 +12,8 @@
 //! deployed contract.
 
 use alloc::{vec, vec::Vec};
-use core::ops::{Deref, DerefMut};
 
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_primitives::{aliases::B32, Address, U256};
 use openzeppelin_stylus_proc::interface_id;
 use stylus_sdk::{
     abi::Bytes,
@@ -40,20 +39,6 @@ pub struct Erc1155Supply {
     pub(crate) total_supply: StorageMap<U256, StorageU256>,
     /// Total supply of all token ids.
     pub(crate) total_supply_all: StorageU256,
-}
-
-impl Deref for Erc1155Supply {
-    type Target = Erc1155;
-
-    fn deref(&self) -> &Self::Target {
-        &self.erc1155
-    }
-}
-
-impl DerefMut for Erc1155Supply {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.erc1155
-    }
 }
 
 /// Required interface of a [`Erc1155Supply`] contract.
@@ -158,10 +143,9 @@ impl IErc1155 for Erc1155Supply {
 
 #[public]
 impl IErc165 for Erc1155Supply {
-    fn supports_interface(&self, interface_id: FixedBytes<4>) -> bool {
+    fn supports_interface(&self, interface_id: B32) -> bool {
         <Self as IErc1155Supply>::interface_id() == interface_id
             || self.erc1155.supports_interface(interface_id)
-            || <Self as IErc165>::interface_id() == interface_id
     }
 }
 
@@ -403,23 +387,24 @@ mod tests {
 
     unsafe impl TopLevelStorage for Erc1155Supply {}
 
-    fn init(
-        contract: &mut Erc1155Supply,
-        receiver: Address,
-        size: usize,
-    ) -> (Vec<U256>, Vec<U256>) {
-        let token_ids = random_token_ids(size);
-        let values = random_values(size);
+    impl Erc1155Supply {
+        fn init(
+            &mut self,
+            receiver: Address,
+            size: usize,
+        ) -> (Vec<U256>, Vec<U256>) {
+            let token_ids = random_token_ids(size);
+            let values = random_values(size);
 
-        contract
-            ._mint_batch(
+            self._mint_batch(
                 receiver,
                 token_ids.clone(),
                 values.clone(),
                 &vec![].into(),
             )
             .expect("should mint");
-        (token_ids, values)
+            (token_ids, values)
+        }
     }
 
     #[motsu::test]
@@ -436,8 +421,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        let (token_ids, values) =
-            contract.init(alice, |contract| init(contract, bob, 1));
+        let (token_ids, values) = contract.sender(alice).init(bob, 1);
         assert_eq!(
             values[0],
             contract.sender(alice).balance_of(bob, token_ids[0])
@@ -456,8 +440,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        let (token_ids, values) =
-            contract.init(alice, |contract| init(contract, bob, 4));
+        let (token_ids, values) = contract.sender(alice).init(bob, 4);
         for (&token_id, &value) in token_ids.iter().zip(values.iter()) {
             assert_eq!(value, contract.sender(alice).balance_of(bob, token_id));
             assert_eq!(value, contract.sender(alice).total_supply(token_id));
@@ -539,8 +522,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        let (token_ids, values) =
-            contract.init(alice, |contract| init(contract, bob, 1));
+        let (token_ids, values) = contract.sender(alice).init(bob, 1);
         contract
             .sender(alice)
             ._burn(bob, token_ids[0], values[0])
@@ -560,8 +542,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        let (token_ids, values) =
-            contract.init(alice, |contract| init(contract, bob, 4));
+        let (token_ids, values) = contract.sender(alice).init(bob, 4);
         contract
             .sender(alice)
             ._burn_batch(bob, token_ids.clone(), values.clone())
@@ -587,8 +568,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        let (token_ids, values) =
-            contract.init(alice, |contract| init(contract, bob, 1));
+        let (token_ids, values) = contract.sender(alice).init(bob, 1);
         let invalid_sender = Address::ZERO;
 
         let err = contract
@@ -627,7 +607,7 @@ mod tests {
     #[motsu::test]
     fn interface_id() {
         let actual = <Erc1155Supply as IErc1155Supply>::interface_id();
-        let expected: FixedBytes<4> = fixed_bytes!("0xeac6339d");
+        let expected: B32 = fixed_bytes!("0xeac6339d");
         assert_eq!(actual, expected);
     }
 

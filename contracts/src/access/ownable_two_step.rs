@@ -17,15 +17,14 @@
 //! available.
 
 use alloc::{vec, vec::Vec};
-use core::ops::{Deref, DerefMut};
 
-use alloy_primitives::{Address, FixedBytes};
+use alloy_primitives::{aliases::B32, Address};
 use openzeppelin_stylus_proc::interface_id;
 pub use sol::*;
 use stylus_sdk::{evm, msg, prelude::*, storage::StorageAddress};
 
 use crate::{
-    access::ownable::{self, IOwnable, Ownable},
+    access::ownable::{self, Ownable},
     utils::introspection::erc165::IErc165,
 };
 
@@ -56,20 +55,6 @@ pub struct Ownable2Step {
     pub ownable: Ownable,
     /// Pending owner of the contract.
     pub(crate) pending_owner: StorageAddress,
-}
-
-impl Deref for Ownable2Step {
-    type Target = Ownable;
-
-    fn deref(&self) -> &Self::Target {
-        &self.ownable
-    }
-}
-
-impl DerefMut for Ownable2Step {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.ownable
-    }
 }
 
 /// Interface for an [`Ownable2Step`] contract.
@@ -241,7 +226,7 @@ impl Ownable2Step {
 
 #[public]
 impl IErc165 for Ownable2Step {
-    fn supports_interface(&self, interface_id: FixedBytes<4>) -> bool {
+    fn supports_interface(&self, interface_id: B32) -> bool {
         <Self as IOwnable2Step>::interface_id() == interface_id
             || self.ownable.supports_interface(interface_id)
             || <Self as IErc165>::interface_id() == interface_id
@@ -251,20 +236,16 @@ impl IErc165 for Ownable2Step {
 #[cfg(test)]
 mod tests {
     use motsu::prelude::Contract;
-    use stylus_sdk::{
-        alloy_primitives::{Address, FixedBytes},
-        prelude::*,
-    };
+    use stylus_sdk::{alloy_primitives::Address, prelude::*};
 
     use super::*;
+    use crate::access::ownable::IOwnable;
 
     unsafe impl TopLevelStorage for Ownable2Step {}
 
     #[motsu::test]
     fn reads_owner(contract: Contract<Ownable2Step>, alice: Address) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
         let owner = contract.sender(alice).owner();
         assert_eq!(owner, alice);
     }
@@ -275,9 +256,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.pending_owner.set(bob);
-        });
+        contract.sender(alice).pending_owner.set(bob);
 
         let pending_owner = contract.sender(alice).pending_owner();
         assert_eq!(pending_owner, bob);
@@ -289,9 +268,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
 
         contract
             .sender(alice)
@@ -308,9 +285,7 @@ mod tests {
         bob: Address,
         dave: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(bob);
-        });
+        contract.sender(alice).constructor(bob).unwrap();
 
         let err = contract.sender(alice).transfer_ownership(dave).unwrap_err();
         assert!(matches!(
@@ -327,10 +302,8 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(bob);
-            contract.pending_owner.set(alice);
-        });
+        contract.sender(alice).constructor(bob).unwrap();
+        contract.sender(alice).pending_owner.set(alice);
 
         contract
             .sender(alice)
@@ -347,10 +320,8 @@ mod tests {
         bob: Address,
         dave: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(bob);
-            contract.pending_owner.set(dave);
-        });
+        contract.sender(alice).constructor(bob).unwrap();
+        contract.sender(alice).pending_owner.set(dave);
 
         let err = contract.sender(alice).accept_ownership().unwrap_err();
         assert!(matches!(
@@ -367,9 +338,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
 
         contract
             .sender(alice)
@@ -388,9 +357,7 @@ mod tests {
 
     #[motsu::test]
     fn renounces_ownership(contract: Contract<Ownable2Step>, alice: Address) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
 
         contract
             .sender(alice)
@@ -405,9 +372,7 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(bob);
-        });
+        contract.sender(alice).constructor(bob).unwrap();
 
         let err = contract.sender(alice).renounce_ownership().unwrap_err();
         assert!(matches!(
@@ -424,10 +389,8 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-            contract.pending_owner.set(bob);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
+        contract.sender(alice).pending_owner.set(bob);
 
         contract
             .sender(alice)
@@ -443,10 +406,8 @@ mod tests {
         alice: Address,
         bob: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-            contract.pending_owner.set(bob);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
+        contract.sender(alice).pending_owner.set(bob);
 
         contract
             .sender(alice)
@@ -463,9 +424,7 @@ mod tests {
         bob: Address,
         dave: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.ownable.owner.set(alice);
-        });
+        contract.sender(alice).constructor(alice).unwrap();
 
         contract
             .sender(alice)
@@ -484,7 +443,7 @@ mod tests {
     #[motsu::test]
     fn interface_id() {
         let actual = <Ownable2Step as IOwnable2Step>::interface_id();
-        let expected: FixedBytes<4> = 0x94be5999_u32.into();
+        let expected: B32 = 0x94be5999_u32.into();
         assert_eq!(actual, expected);
     }
 

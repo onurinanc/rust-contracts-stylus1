@@ -1,4 +1,9 @@
 //! This module provides common operations to work with elliptic curves.
+//!
+//! Abstractions and api in this module are similar to Arkworks Algebra [ark-ec
+//! library].
+//!
+//! [ark-ec library]: https://github.com/arkworks-rs/algebra/tree/master/ec
 
 use alloc::vec::Vec;
 use core::{
@@ -17,6 +22,7 @@ use crate::{
 
 mod helpers;
 pub mod sw;
+pub mod te;
 
 /// Elliptic curves can be represented via different "models" with varying
 /// efficiency properties.

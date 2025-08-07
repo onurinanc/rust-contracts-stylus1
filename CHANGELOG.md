@@ -9,9 +9,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-### Changed
+- Add UUPS Proxy: `UUPSUpgradeable` contract and `IErc1822Proxiable` trait. #752
+- Add `EnumerableSet` generic type. #733
+- Add `EnumerableSet` implementation for: `Address`, `B256`, `U8`, `U16`, `U32`, `U64`, `U128`, `U256`. #733
+- Add `IErc1155Receiver` trait. #747
+- Add `Erc1155Holder` contract. #747
+- Add `IErc721Receiver` trait. #743
+- Add `Erc721Holder` contract. #743
+- Add `Precompiles::p256_verify` wrapper function. #754
+- The `Precompiles::ec_recover` is now callable on `&self`. #754
+- The `ecdsa::recover` function now accepts `impl StaticCallContext` instead of `&mut impl TopLevelStorage`. #754
+- `SafeErc20` now implements: `try_safe_transfer`, `try_safe_transfer_from`, `transfer_and_call_relaxed`, `transfer_from_and_call_relaxed` and `approve_and_call_relaxed`. #765
+- Add bidirectional conversions between `ruint::Uint` and crypto library `Uint` types behind `ruint` feature toggle. #758
+- Add bidirectional conversions between `Uint` and `u8`, `u16`, `u32`, `u64`, `u128` types. #764
 
 ### Changed (Breaking)
+
+- Remove initial `EnumerableAddressSet` implementation. #733
+- Rename `IERC721Receiver` Solidity Interface to `IErc721ReceiverInterface`. #743
+- Change `RECEIVER_FN_SELECTOR` type to `FixedBytes<4>`. #743
+- Rename `IERC1155Receiver` Solidity Interface to `IErc1155ReceiverInterface`. #747
+- Change `Erc1155Receiver` constants `SINGLE_TRANSFER_FN_SELECTOR` and `BATCH_TRANSFER_FN_SELECTOR` to type `B32`. #747
+- Change `Erc721Receiver` constant `RECEIVER_FN_SELECTOR` to type `B32`. #747
+- Rename `Precompiles::ecrecover` wrapper function to `Precompiles::ec_recover`. #754
+- Replace associated error type with `Vec<u8>` in `IErc1155Receiver` and `IErc721Receiver` traits. #770
+- Add `IErc721Receiver` trait bound to the `IErc721Wrapper` trait. #770
+
+### Changed
+
+- Rename `FixedBytes<4>` to `B32` and `FixedBytes<32>` to `B256` and `StorageFixedBytes<32>` to `StorageB256`. #747
+- Replace `SafeErc20::encodes_true` with `Bool::abi_decode` in `SafeErc20` when decoding the bytes result. #754
+- Simplify Pedersen hash API to accept any type that implements `Into<P::BaseField>`. #758
+
+### Fixed
+
+- Fix `export-abi` bug for `reentrant` feature. #753
+
+## [0.3.0-alpha.1] - 2025-07-21
+
+- Add `BeaconProxy` contract and `IBeacon` interface, supporting the beacon proxy pattern for upgradeable contracts. #729
+- Add `UpgradeableBeacon` contract, allowing upgradeable beacon-based proxies with owner-controlled implementation upgrades. #729
+- Add Solidity interface bindings for beacon-related contracts. #729
+- Add internal utilities for interacting with beacon proxies and validating beacon implementations. #729
+- Add `AccessControlEnumerable` extension that supports role member enumeration. #622
+- Add `EnumerableAddressSet`. #622
+- Add Twisted-Edwards Curves. #633
+- Add Elliptic Curve Configurations: secp256k1, Baby Jubjub, Bandersnatch, Curve25519, Jubjub. #738
+- Add `Precompiles` trait for ergonomic precompile invocation. #689
+
+### Changed
+
+- Remove redundant interface ID check from `Erc1155Supply::supports_interface`. #725
+
+### Changed (Breaking)
+
+- Bump cargo-stylus to `v0.6.1`. #726
+- Remove implementation of `Deref<Target = Erc1155>` for `Erc1155Supply`, `Deref<Target = Erc721>` for `Erc721Consecutive`, and `Deref<Target = Ownable>` for `Ownable2Step`. #724
+- Adjust `PedersenParams` trait to support both `SWCurveConfig` & `TECurveConfig`. #738
+- Move Starknet Curve configuration to a dedicated instance module. #738
+
+## [v0.2.0] - 2025-06-20
+
+> **Heads-up:** this is the production release after four pre-releases
+> (`alpha.1-4`, `rc.0`). The items below aggregate the _user-facing_ changes
+> since **v0.1.2**. For the step-by-step evolution, see the individual
+> pre-release sections further down.
+
+### Added
+
+- **ERC-1155 token** (`Erc1155`, `Burnable`, `MetadataUri`, `Supply`, `UriStorage`).
+- **ERC-4626** “Tokenized Vault Standard” and **ERC-20 Flash Mint** extension.
+- **ERC-2981** on-chain royalties.
+- **ERC-20 Utils**: `SafeErc20`.
+- **Finance**: `VestingWallet`.
+- **Ownership**: `Ownable2Step`.
+- **Token wrappers**: `Erc20Wrapper`, `Erc721Wrapper`.
+- **Cryptography**: Poseidon2 hash, Pedersen hash (Starknet params), Short-Weierstrass Curves.
+- **Math & utils**: optimised `Uint<_>` big-integer ops (`mul_div`, shift-left/right, checked/unchecked add/sub).
+- **Constructors** now supported across all contracts.
+- All events derive `Debug`; contracts implement `MethodError` and `IErc165`.
+
+### Changed
+
+- Keccak constants pre-computed at compile-time.
+- Optimisations across contracts and crypto libraries.
+
+### Changed (Breaking)
+
+- **Stylus SDK** ↑ to **v0.9.0** (`cargo-stylus` ↑ to v0.6.0)
+- Contracts refactored to new inheritance model.
+- Interface IDs now returned by `fn interface_id()`; `IErc165::supports_interface` takes `&self`; `Erc165` struct removed.
+- Public state fields made private.
+- Feature **`std` removed** from libraries.
+
+### Fixed
+
+- Correct ERC-165 IDs for `IErc721Metadata`, `IErc721Enumerable`, etc.
+- `#[interface_id]` macro now propagates super-traits correctly.
+- Edge-cases in Merkle proofs, big-int overflows and re-entrancy bugs resolved.
 
 ## [v0.2.0-rc.0] - 2025-05-22
 

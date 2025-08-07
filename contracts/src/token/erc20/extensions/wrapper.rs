@@ -20,15 +20,21 @@ use stylus_sdk::{
     call::{Call, MethodError},
     contract, msg,
     prelude::*,
-    storage::{StorageAddress, StorageU8},
+    storage::StorageAddress,
 };
 
 use crate::token::erc20::{
     self,
-    interface::Erc20Interface,
+    interface::{Erc20Interface, IErc20MetadataInterface},
     utils::{safe_erc20, ISafeErc20, SafeErc20},
     Erc20, IErc20,
 };
+
+/// Default number of decimals for an [ERC-20] token.
+///
+/// [ERC-20]: <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.3.0/contracts/token/ERC20/ERC20.sol>
+const DEFAULT_DECIMALS: u8 = 18;
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod sol {
     use alloy_sol_macro::sol;
@@ -113,10 +119,6 @@ impl MethodError for Error {
 pub struct Erc20Wrapper {
     /// Address of the underlying token.
     pub(crate) underlying: StorageAddress,
-    // TODO: Remove this field once function overriding is possible. For now we
-    // keep this field `pub`, since this is used to simulate overriding.
-    /// Underlying token decimals.
-    pub underlying_decimals: StorageU8,
     /// [`SafeErc20`] contract.
     safe_erc20: SafeErc20,
 }
@@ -224,7 +226,11 @@ impl Erc20Wrapper {
     /// See [`IErc20Wrapper::decimals`].
     #[must_use]
     pub fn decimals(&self) -> U8 {
-        self.underlying_decimals.get()
+        U8::from(
+            IErc20MetadataInterface::new(self.underlying())
+                .decimals(self)
+                .unwrap_or(DEFAULT_DECIMALS),
+        )
     }
 
     /// See [`IErc20Wrapper::underlying`].
@@ -344,9 +350,9 @@ impl Erc20Wrapper {
     ) -> Result<U256, Error> {
         let contract_address = contract::address();
 
-        let underline_token = Erc20Interface::new(self.underlying());
+        let underlying_token = Erc20Interface::new(self.underlying());
 
-        let underlying_balance = underline_token
+        let underlying_balance = underlying_token
             .balance_of(Call::new_in(self), contract_address)
             .map_err(|_| ERC20InvalidUnderlying { token: contract_address })?;
 
@@ -364,10 +370,47 @@ impl Erc20Wrapper {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{uint, FixedBytes};
+    use alloy_primitives::{aliases::B32, uint};
     use motsu::prelude::*;
 
     use super::*;
+    use crate::{
+        token::erc20::extensions::IErc20Metadata,
+        utils::introspection::erc165::IErc165,
+    };
+
+    const DUMMY_TEST_DECIMALS: u8 = 12;
+    #[storage]
+    struct DummyErc20Metadata {}
+
+    #[public]
+    #[implements(IErc20Metadata, IErc165)]
+    impl DummyErc20Metadata {}
+
+    #[public]
+    impl IErc20Metadata for DummyErc20Metadata {
+        fn name(&self) -> String {
+            "DummyErc20Metadata".into()
+        }
+
+        fn symbol(&self) -> String {
+            "TTK".into()
+        }
+
+        fn decimals(&self) -> U8 {
+            U8::from(DUMMY_TEST_DECIMALS)
+        }
+    }
+
+    #[public]
+    impl IErc165 for DummyErc20Metadata {
+        fn supports_interface(&self, _interface_id: B32) -> bool {
+            // dummy implementation, required by [`IErc20Metadata`] trait.
+            true
+        }
+    }
+
+    unsafe impl TopLevelStorage for DummyErc20Metadata {}
 
     #[storage]
     struct Erc20WrapperTestExample {
@@ -378,6 +421,14 @@ mod tests {
     #[public]
     #[implements(IErc20Wrapper<Error = Error>)]
     impl Erc20WrapperTestExample {
+        #[constructor]
+        fn constructor(
+            &mut self,
+            underlying_token: Address,
+        ) -> Result<(), Error> {
+            self.wrapper.constructor(underlying_token)
+        }
+
         fn recover(&mut self, account: Address) -> Result<U256, Error> {
             self.wrapper._recover(account, &mut self.erc20)
         }
@@ -417,14 +468,17 @@ mod tests {
     #[motsu::test]
     fn decimals_works(
         contract: Contract<Erc20WrapperTestExample>,
+        metadata: Contract<DummyErc20Metadata>,
         alice: Address,
     ) {
-        let decimals = uint!(18_U8);
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying_decimals.set(decimals);
-        });
-
-        assert_eq!(contract.sender(alice).decimals(), decimals);
+        contract
+            .sender(alice)
+            .constructor(metadata.address())
+            .motsu_expect("should construct");
+        assert_eq!(
+            contract.sender(alice).decimals(),
+            U8::from(DUMMY_TEST_DECIMALS)
+        );
     }
 
     #[motsu::test]
@@ -435,27 +489,47 @@ mod tests {
     ) {
         let erc20_address = erc20_contract.address();
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_address);
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_address)
+            .motsu_expect("should construct");
 
         assert_eq!(contract.sender(alice).underlying(), erc20_address);
     }
 
     #[motsu::test]
+    fn constructor_reverts_when_invalid_asset(
+        contract: Contract<Erc20WrapperTestExample>,
+        alice: Address,
+    ) {
+        let invalid_asset = contract.address();
+
+        let err = contract
+            .sender(alice)
+            .constructor(invalid_asset)
+            .motsu_expect_err("should return Error::InvalidUnderlying");
+
+        assert!(matches!(
+            err,
+            Error::InvalidUnderlying(ERC20InvalidUnderlying { token })
+                if token == invalid_asset
+        ));
+    }
+
+    #[motsu::test]
+    #[ignore = "TODO: unignore once motsu fixes https://github.com/OpenZeppelin/stylus-test-helpers/issues/115."]
     fn deposit_for_reverts_when_invalid_asset(
         contract: Contract<Erc20WrapperTestExample>,
         alice: Address,
     ) {
+        // assume an invalid underlying asset is somehow set in the contract
         let invalid_asset = alice;
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(invalid_asset);
-        });
+        contract.sender(alice).wrapper.underlying.set(invalid_asset);
 
         let err = contract
             .sender(alice)
-            .deposit_for(invalid_asset, uint!(10_U256))
-            .motsu_expect_err("should return Error::SafeErc20");
+            .deposit_for(alice, uint!(10_U256))
+            .motsu_expect_err("should return Error::SafeErc20FailedOperation");
 
         assert!(matches!(
             err,
@@ -473,9 +547,10 @@ mod tests {
     ) {
         let invalid_sender = contract.address();
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         let err = contract
             .sender(invalid_sender)
@@ -496,9 +571,10 @@ mod tests {
     ) {
         let invalid_receiver = contract.address();
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         let err = contract
             .sender(alice)
@@ -519,9 +595,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -551,9 +628,10 @@ mod tests {
 
         let exceeding_value = amount + uint!(1_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -586,9 +664,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -657,9 +736,10 @@ mod tests {
         alice: Address,
     ) {
         let invalid_receiver = contract.address();
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         let err = contract
             .sender(alice)
@@ -680,9 +760,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -726,9 +807,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -809,12 +891,10 @@ mod tests {
     #[ignore]
     fn recover_reverts_when_invalid_underlying(
         contract: Contract<Erc20WrapperTestExample>,
-        invalid_underlying: Contract<NonErc20>,
         alice: Address,
     ) {
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(invalid_underlying.address());
-        });
+        let invalid_underlying = alice;
+        contract.sender(alice).wrapper.underlying.set(invalid_underlying);
 
         let err = contract
             .sender(alice)
@@ -822,7 +902,7 @@ mod tests {
             .motsu_expect_err("should return Error::InvalidUnderlying");
 
         assert!(matches!(
-            err, Error::InvalidUnderlying(ERC20InvalidUnderlying { token }) if token == invalid_underlying.address()
+            err, Error::InvalidUnderlying(ERC20InvalidUnderlying { token }) if token == invalid_underlying
         ));
     }
 
@@ -835,9 +915,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -873,9 +954,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -909,9 +991,10 @@ mod tests {
     ) {
         let amount = uint!(10_U256);
 
-        contract.init(alice, |contract| {
-            contract.wrapper.underlying.set(erc20_contract.address());
-        });
+        contract
+            .sender(alice)
+            .constructor(erc20_contract.address())
+            .motsu_expect("should construct");
 
         erc20_contract
             .sender(alice)
@@ -953,7 +1036,7 @@ mod tests {
     #[motsu::test]
     fn interface_id() {
         let actual = <Erc20WrapperTestExample as IErc20Wrapper>::interface_id();
-        let expected: FixedBytes<4> = 0x511f913e_u32.into();
+        let expected: B32 = 0x511f913e_u32.into();
         assert_eq!(actual, expected);
     }
 }

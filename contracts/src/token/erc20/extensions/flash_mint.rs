@@ -125,7 +125,7 @@ mod borrower {
     use stylus_sdk::prelude::sol_interface;
 
     sol_interface! {
-        /// Interface of the ERC-3156 FlashBorrower, as defined in [ERC-3156].
+        /// Interface of the ERC-3156 Flash Borrower, as defined in [ERC-3156].
         ///
         /// [ERC-3156]: https://eips.ethereum.org/EIPS/eip-3156
         interface IERC3156FlashBorrower {
@@ -356,12 +356,21 @@ impl Erc20FlashMint {
     }
 }
 
+// TODO: implement `IErc165` once `IErc3156FlashLender` is implemented for
+// `Erc20FlashMint`.
+// impl IErc165 for Erc20FlashMint {
+//     fn supports_interface(&self, interface_id: B32) -> bool {
+//         <Self as IErc3156FlashLender>::interface_id() == interface_id
+//             || <Self as IErc165>::interface_id() == interface_id
+//     }
+// }
+
 #[cfg(test)]
 mod tests {
     use motsu::prelude::*;
     use stylus_sdk::{
         abi::Bytes,
-        alloy_primitives::{uint, Address, FixedBytes, U256},
+        alloy_primitives::{aliases::B32, uint, Address, U256},
         prelude::*,
     };
 
@@ -438,12 +447,11 @@ mod tests {
     ) {
         let initial_supply = uint!(10000_U256);
 
-        contract.init(alice, |contract| {
-            contract
-                .erc20
-                ._mint(alice, initial_supply)
-                .motsu_expect("should mint initial supply tokens");
-        });
+        contract
+            .sender(alice)
+            .erc20
+            ._mint(alice, initial_supply)
+            .motsu_expect("should mint initial supply tokens");
 
         let max_flash_loan =
             contract.sender(alice).max_flash_loan(contract.address());
@@ -457,9 +465,11 @@ mod tests {
         alice: Address,
     ) {
         let flash_fee_value = uint!(69_U256);
-        contract.init(alice, |contract| {
-            contract.erc20_flash_mint.flash_fee_value.set(flash_fee_value);
-        });
+        contract
+            .sender(alice)
+            .erc20_flash_mint
+            .flash_fee_value
+            .set(flash_fee_value);
 
         let flash_fee = contract
             .sender(alice)
@@ -495,12 +505,11 @@ mod tests {
     ) {
         let initial_supply = uint!(10000_U256);
 
-        contract.init(alice, |contract| {
-            contract
-                .erc20
-                ._mint(alice, initial_supply)
-                .motsu_expect("should mint initial supply tokens");
-        });
+        contract
+            .sender(alice)
+            .erc20
+            ._mint(alice, initial_supply)
+            .motsu_expect("should mint initial supply tokens");
 
         let err = contract
             .sender(alice)
@@ -564,7 +573,7 @@ mod tests {
     fn interface_id() {
         let actual =
             <Erc20FlashMintTestExample as IErc3156FlashLender>::interface_id();
-        let expected: FixedBytes<4> = 0xe4143091_u32.into();
+        let expected: B32 = 0xe4143091_u32.into();
         assert_eq!(actual, expected);
     }
 }

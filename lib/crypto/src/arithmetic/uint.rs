@@ -23,7 +23,7 @@ use crate::{
         BigInteger,
     },
     bits::BitIteratorBE,
-    ct_for, ct_for_unroll6,
+    ct_for, ct_for_unroll6, ct_rev_for,
 };
 
 /// Stack-allocated big unsigned integer.
@@ -104,73 +104,80 @@ impl<const N: usize> Uint<N> {
     #[must_use]
     #[inline(always)]
     pub const fn ct_ge(&self, rhs: &Self) -> bool {
+        let mut result = true;
         ct_for_unroll6!((i in 0..N) {
-            let a = self.limbs[N - i - 1];
-            let b = rhs.limbs[N - i - 1];
+            let a = self.limbs[i];
+            let b = rhs.limbs[i];
             if a > b {
-                return true;
+                result = true;
             } else if a < b {
-                return false;
+                result = false;
             }
         });
-        true
+        result
     }
 
     /// Checks `self` is greater then `rhs` (constant).
     #[must_use]
     #[inline(always)]
     pub const fn ct_gt(&self, rhs: &Self) -> bool {
+        let mut result = false;
         ct_for_unroll6!((i in 0..N) {
-            let a = self.limbs[N - i - 1];
-            let b = rhs.limbs[N - i - 1];
+            let a = self.limbs[i];
+            let b = rhs.limbs[i];
             if a > b {
-                return true;
+                result = true;
             } else if a < b {
-                return false;
+                result = false;
             }
         });
-        false
+        result
     }
 
     /// Checks `self` is less or equal then `rhs` (constant).
     #[must_use]
     #[inline(always)]
     pub const fn ct_le(&self, rhs: &Self) -> bool {
+        let mut result = true;
         ct_for_unroll6!((i in 0..N) {
-            let a = self.limbs[N - i - 1];
-            let b = rhs.limbs[N - i - 1];
+            let a = self.limbs[i];
+            let b = rhs.limbs[i];
             if a < b {
-                return true;
+                result = true;
             } else if a > b {
-                return false;
+                result = false;
             }
         });
-        true
+        result
     }
 
     /// Checks `self` is less then `rhs` (constant).
     #[must_use]
+    #[inline(always)]
     pub const fn ct_lt(&self, rhs: &Self) -> bool {
+        let mut result = false;
         ct_for_unroll6!((i in 0..N) {
-            let a = self.limbs[N - i - 1];
-            let b = rhs.limbs[N - i - 1];
+            let a = self.limbs[i];
+            let b = rhs.limbs[i];
             if a < b {
-                return true;
+                result = true;
             } else if a > b {
-                return false;
+                result = false;
             }
         });
-        false
+        result
     }
 
     /// Checks `self` is zero (constant).
     #[must_use]
+    #[inline(always)]
     pub const fn ct_is_zero(&self) -> bool {
         self.ct_eq(&Self::ZERO)
     }
 
     /// Checks if `self` is equal to `rhs` (constant).
     #[must_use]
+    #[inline(always)]
     pub const fn ct_eq(&self, rhs: &Self) -> bool {
         ct_for!((i in 0..N) {
             if self.limbs[i] != rhs.limbs[i] {
@@ -188,15 +195,21 @@ impl<const N: usize> Uint<N> {
     }
 
     /// Return the minimum number of bits needed to encode this number.
+    ///
+    /// One bit is necessary to encode zero.
     #[doc(hidden)]
     #[must_use]
     pub const fn ct_num_bits(&self) -> usize {
+        // One bit is necessary to encode zero.
+        if self.ct_is_zero() {
+            return 1;
+        }
+
         // Total number of bits.
         let mut num_bits = Self::BITS;
 
         // Start with the last (highest) limb.
-        let mut index = N - 1;
-        loop {
+        ct_rev_for!((index in 0..N) {
             // Subtract leading zeroes, from the total number of limbs.
             let leading = self.limbs[index].leading_zeros() as usize;
             num_bits -= leading;
@@ -205,12 +218,7 @@ impl<const N: usize> Uint<N> {
             if leading != 64 {
                 break;
             }
-
-            if index == 0 {
-                break;
-            }
-            index -= 1;
-        }
+        });
 
         // And return the result.
         num_bits
@@ -277,13 +285,13 @@ impl<const N: usize> Uint<N> {
     #[inline(always)]
     #[must_use]
     pub const fn ct_checked_sub(mut self, rhs: &Self) -> (Self, bool) {
-        let mut borrow = 0;
+        let mut borrow = false;
 
         ct_for_unroll6!((i in 0..N) {
             (self.limbs[i], borrow) = limb::sbb(self.limbs[i], rhs.limbs[i], borrow);
         });
 
-        (self, borrow != 0)
+        (self, borrow)
     }
 
     /// Subtract `rhs` from `self`, returning the result wrapping around the
@@ -299,13 +307,13 @@ impl<const N: usize> Uint<N> {
     #[inline]
     #[must_use]
     pub const fn ct_checked_add(mut self, rhs: &Self) -> (Self, bool) {
-        let mut carry = 0;
+        let mut carry = false;
 
         ct_for!((i in 0..N) {
             (self.limbs[i], carry) = limb::adc(self.limbs[i], rhs.limbs[i], carry);
         });
 
-        (self, carry != 0)
+        (self, carry)
     }
 
     /// Add `rhs` to `self` in-place, returning whether overflow occurred.
@@ -390,22 +398,22 @@ impl<const N: usize> Uint<N> {
     /// Add two numbers and panic on overflow.
     #[must_use]
     pub const fn ct_add(&self, rhs: &Self) -> Self {
-        let (low, carry) = self.ct_adc(rhs, Limb::ZERO);
-        assert!(carry == 0, "overflow on addition");
+        let (low, carry) = self.ct_adc(rhs, false);
+        assert!(!carry, "overflow on addition");
         low
     }
 
     /// Add two numbers wrapping around the upper boundary.
     #[must_use]
     pub const fn ct_wrapping_add(&self, rhs: &Self) -> Self {
-        let (low, _) = self.ct_adc(rhs, Limb::ZERO);
+        let (low, _) = self.ct_adc(rhs, false);
         low
     }
 
     /// Computes `a + b + carry`, returning the result along with the new carry.
     #[inline(always)]
     #[must_use]
-    pub const fn ct_adc(&self, rhs: &Uint<N>, mut carry: Limb) -> (Self, Limb) {
+    pub const fn ct_adc(&self, rhs: &Uint<N>, mut carry: bool) -> (Self, bool) {
         let mut limbs = [Limb::ZERO; N];
 
         ct_for!((i in 0..N) {
@@ -440,7 +448,7 @@ impl<const N: usize> Uint<N> {
 
 // ----------- From Impls -----------
 
-/// Constant implementation from primitives.
+/// Constant conversions from primitive types.
 macro_rules! impl_ct_from_primitive {
     ($int:ty, $func_name:ident) => {
         impl<const N: usize> Uint<N> {
@@ -515,6 +523,101 @@ impl_from_primitive!(u64, from_u64);
 impl_from_primitive!(usize, from_usize);
 impl_from_primitive!(u128, from_u128);
 
+/// Constant conversions into primitive types.
+///
+/// Implements conversion [`Uint`] -> `$int` for `$int` not bigger than `Limb`'s
+/// max size.
+macro_rules! impl_ct_into_primitive {
+    ($int:ty, $func_name:ident) => {
+        impl<const N: usize> Uint<N> {
+            #[doc = "Create a"]
+            #[doc = stringify!($int)]
+            #[doc = "integer from [`Uint`] (constant)."]
+            #[doc = "# Panics"]
+            #[doc = "* If [`Uint`] type is too large to fit into primitive integer."]
+            #[must_use]
+            #[allow(clippy::cast_possible_truncation)]
+            pub const fn $func_name(self) -> $int {
+                assert!(N >= 1, "number of limbs must be greater than zero");
+                // Each limb besides the first one should be zero,
+                ct_for!((i in 1..N) {
+                    // otherwise panic with overflow.
+                    assert!(self.limbs[i] == 0, "Uint type is to large to fit");
+                });
+                // Panic if the first limb's value is bigger than maximum of resulted integer.
+                assert!(
+                    self.limbs[0] <= <$int>::MAX as Limb,
+                    "Uint type is to large to fit"
+                );
+
+                self.limbs[0] as $int
+            }
+        }
+    };
+}
+
+impl_ct_into_primitive!(u8, into_u8);
+impl_ct_into_primitive!(u16, into_u16);
+impl_ct_into_primitive!(u32, into_u32);
+impl_ct_into_primitive!(u64, into_u64);
+impl_ct_into_primitive!(usize, into_usize);
+
+impl<const N: usize> Uint<N> {
+    /// Create a `u128` integer from [`Uint`] (constant).
+    ///
+    /// # Panics
+    ///
+    /// * If [`Uint`] type is too large to fit into primitive integer.
+    #[must_use]
+    pub const fn into_u128(self) -> u128 {
+        assert!(N >= 1, "number of limbs must be greater than zero");
+        // Each limb besides the first two should be zero,
+        ct_for!((i in 2..N) {
+            // otherwise panic with overflow.
+            assert!(self.limbs[i] == 0, "Uint type is to large to fit");
+        });
+
+        // Type u128 can be safely packed in two `64-bit` limbs.
+        let res0 = self.limbs[0] as u128;
+        let res1 = (self.limbs[1] as u128) << 64;
+        res0 | res1
+    }
+}
+
+/// From traits implementation for [`Uint`] into primitive types.
+macro_rules! impl_from_uint {
+    ($int:ty, $func_name:ident) => {
+        impl<const N: usize> From<Uint<N>> for $int {
+            #[inline]
+            fn from(val: Uint<N>) -> $int {
+                val.$func_name()
+            }
+        }
+    };
+}
+
+impl_from_uint!(u8, into_u8);
+impl_from_uint!(u16, into_u16);
+impl_from_uint!(u32, into_u32);
+impl_from_uint!(u64, into_u64);
+impl_from_uint!(usize, into_usize);
+impl_from_uint!(u128, into_u128);
+
+#[cfg(feature = "ruint")]
+impl<const B: usize, const L: usize> From<ruint::Uint<B, L>> for Uint<L> {
+    fn from(value: ruint::Uint<B, L>) -> Self {
+        Uint::from_bytes_le(&value.to_le_bytes_vec())
+    }
+}
+
+#[cfg(feature = "ruint")]
+impl<const B: usize, const L: usize> From<Uint<L>> for ruint::Uint<B, L> {
+    fn from(value: Uint<L>) -> Self {
+        // Panics if ruint::Uint size is too small.
+        ruint::Uint::from_le_slice(&value.into_bytes_le())
+    }
+}
+
 // ----------- Traits Impls -----------
 
 impl<const N: usize> UpperHex for Uint<N> {
@@ -545,16 +648,17 @@ impl<const N: usize> Debug for Uint<N> {
 impl<const N: usize> Ord for Uint<N> {
     #[inline]
     fn cmp(&self, rhs: &Self) -> Ordering {
+        let mut result = Ordering::Equal;
         ct_for_unroll6!((i in 0..N) {
-            let a = &self.limbs[N - i - 1];
-            let b = &rhs.limbs[N - i - 1];
+            let a = &self.limbs[i];
+            let b = &rhs.limbs[i];
             match a.cmp(b) {
                 Ordering::Equal => {}
-                order => return order,
+                order => {result = order},
             }
         });
 
-        Ordering::Equal
+        result
     }
 }
 
@@ -652,32 +756,47 @@ impl<const N: usize> Shr<u32> for Uint<N> {
 }
 
 impl<const N: usize> ShrAssign<u32> for Uint<N> {
+    #[allow(clippy::similar_names)]
+    #[allow(clippy::cast_possible_truncation)]
     fn shr_assign(&mut self, rhs: u32) {
         let shift = rhs as usize;
         let bits = Limb::BITS as usize;
 
-        // If the shift is greater than the number of bits in the number.
-        if N * bits <= shift {
-            *self = Self::ZERO;
-            return;
-        }
+        assert!(N * bits > shift, "attempt to shift right with overflow");
+
+        // Limb shift will probably affect changes between two adjacent limbs.
+        // Compute indexes of both limbs that can be changed during a single
+        // iteration.
+        let index2_shift = shift / bits;
+        let index1_shift = index2_shift + 1;
+
+        // The following shifts can overflow.
+        // Overflow should be interpreted with zero output.
+        let limb_right_shift = (shift % bits) as u32;
+        let limb_left_shift = (bits - shift % bits) as u32;
 
         // Shift bits in limbs array in-place.
+        // Start from the lowest order limb.
         for index in 0..N {
-            let limb_shift = shift % bits;
-            let index_shift = shift / bits;
+            // Take limb from index leaving 0.
+            let current_limb = core::mem::take(&mut self.limbs[index]);
 
-            let current_limb = self.limbs[index];
-            self.limbs[index] = 0;
-
-            if index_shift < index {
-                let index1 = index - index_shift - 1;
-                self.limbs[index1] |= current_limb << (bits - limb_shift);
+            if index1_shift <= index {
+                let index1 = index - index1_shift;
+                // Possible to copy the first part of limb with bit AND
+                // operation, since the previous limbs were left zero.
+                self.limbs[index1] |= current_limb
+                    .checked_shl(limb_left_shift)
+                    .unwrap_or_default();
             }
 
-            if index_shift <= index {
-                let index2 = index - index_shift;
-                self.limbs[index2] |= current_limb >> limb_shift;
+            if index2_shift <= index {
+                let index2 = index - index2_shift;
+                // Possible to copy the second part of limb with bit AND
+                // operation, since the previous limbs were left zero.
+                self.limbs[index2] |= current_limb
+                    .checked_shr(limb_right_shift)
+                    .unwrap_or_default();
             }
         }
     }
@@ -693,32 +812,47 @@ impl<const N: usize> Shl<u32> for Uint<N> {
 }
 
 impl<const N: usize> ShlAssign<u32> for Uint<N> {
+    #[allow(clippy::similar_names)]
+    #[allow(clippy::cast_possible_truncation)]
     fn shl_assign(&mut self, rhs: u32) {
         let shift = rhs as usize;
         let bits = Limb::BITS as usize;
 
-        // If the shift is greater than the number of bits in the number.
-        if N * bits <= shift {
-            *self = Self::ZERO;
-            return;
-        }
+        assert!(N * bits > shift, "attempt to shift left with overflow");
+
+        // Limb shift will probably affect changes between two adjacent limbs.
+        // Compute indexes of both limbs that can be changed during a single
+        // iteration.
+        let index1_shift = shift / bits;
+        let index2_shift = index1_shift + 1;
+
+        // The following shifts can overflow.
+        // Overflow should be interpreted with zero output.
+        let limb_left_shift = (shift % bits) as u32;
+        let limb_right_shift = (bits - shift % bits) as u32;
 
         // Shift bits in limbs array in-place.
+        // Start from the highest order limb.
         for index in (0..N).rev() {
-            let limb_shift = shift % bits;
-            let index_shift = shift / bits;
+            // Take limb from index leaving 0.
+            let current_limb = core::mem::take(&mut self.limbs[index]);
 
-            let current_limb = self.limbs[index];
-            self.limbs[index] = 0;
-
-            let index1 = index + index_shift;
+            let index1 = index + index1_shift;
             if index1 < N {
-                self.limbs[index1] |= current_limb << limb_shift;
+                // Possible to copy the first part of limb with bit AND
+                // operation, since the previous limbs were left zero.
+                self.limbs[index1] |= current_limb
+                    .checked_shl(limb_left_shift)
+                    .unwrap_or_default();
             }
 
-            let index2 = index1 + 1;
+            let index2 = index + index2_shift;
             if index2 < N {
-                self.limbs[index2] |= current_limb >> (bits - limb_shift);
+                // Possible to copy the second part of limb with bit AND
+                // operation, since the previous limbs were left zero.
+                self.limbs[index2] |= current_limb
+                    .checked_shr(limb_right_shift)
+                    .unwrap_or_default();
             }
         }
     }
@@ -822,8 +956,12 @@ pub const fn from_str_radix<const LIMBS: usize>(
 /// This implementation performs faster than [`from_str_radix`], since it
 /// assumes the radix is already `16`.
 ///
-/// If the string number is shorter, then [`Uint`] can store.
-/// Returns a [`Uint`] with leading zeroes.
+/// If the string number is shorter, then [`Uint`] can store, returns a [`Uint`]
+/// with leading zeroes.
+///
+/// # Panics
+///
+/// * If hex encoded number is too large to fit in [`Uint`].
 #[must_use]
 pub const fn from_str_hex<const LIMBS: usize>(s: &str) -> Uint<LIMBS> {
     let bytes = s.as_bytes();
@@ -845,10 +983,12 @@ pub const fn from_str_hex<const LIMBS: usize>(s: &str) -> Uint<LIMBS> {
     loop {
         let digit = parse_digit(bytes[index], digit_radix) as Limb;
 
+        let limb_index = (num_index / digits_in_limb) as usize;
+        assert!(limb_index < num.len(), "hex number is too large");
+
         // Since a base-16 digit can be represented with the same bits, we can
         // copy these bits.
-        let digit_mask = digit << ((num_index % digits_in_limb) * digit_size);
-        num[(num_index / digits_in_limb) as usize] |= digit_mask;
+        num[limb_index] |= digit << ((num_index % digits_in_limb) * digit_size);
 
         // If we reached the beginning of the string, return the number.
         if index == 0 {
@@ -921,7 +1061,7 @@ impl<const N: usize> WideUint<N> {
         Self { low, high }
     }
 
-    /// Compute a reminder of division `self` by `rhs` (constant).
+    /// Compute the remainder of division `self` by `rhs` (constant).
     ///
     /// Basic division algorithm based on [wiki].
     /// Fine to be used for constant evaluation, but slow in runtime.
@@ -932,37 +1072,35 @@ impl<const N: usize> WideUint<N> {
         assert!(!rhs.ct_is_zero(), "should not divide by zero");
 
         let mut remainder = Uint::<N>::ZERO;
+        let num_bits = self.ct_num_bits();
 
-        // Start with the last bit.
-        let mut index = self.ct_num_bits() - 1;
-        loop {
+        // Start from the last bit.
+        ct_rev_for!((index in 0..num_bits) {
             // Shift the remainder to the left by 1,
             let (result, carry) = remainder.ct_checked_mul2();
             remainder = result;
 
-            // and set the first bit to reminder from the dividend.
+            // and set the first bit to remainder from the dividend.
             remainder.limbs[0] |= self.ct_get_bit(index) as Limb;
 
             // If the remainder overflows, subtract the divisor.
             if remainder.ct_ge(rhs) || carry {
                 (remainder, _) = remainder.ct_checked_sub(rhs);
             }
+        });
 
-            if index == 0 {
-                break remainder;
-            }
-            index -= 1;
-        }
+        remainder
     }
 
     /// Find the number of bits in the binary decomposition of `self`.
+    ///
+    /// One bit is necessary to encode zero.
     #[must_use]
     pub const fn ct_num_bits(&self) -> usize {
-        let high_num_bits = self.high.ct_num_bits();
-        if high_num_bits == 0 {
+        if self.high.ct_is_zero() {
             self.low.ct_num_bits()
         } else {
-            high_num_bits + Uint::<N>::BITS
+            self.high.ct_num_bits() + Uint::<N>::BITS
         }
     }
 
@@ -984,7 +1122,7 @@ mod test {
     use crate::{
         arithmetic::{
             uint::{from_str_hex, from_str_radix, Uint, WideUint, U256},
-            *,
+            BigInteger, Limb,
         },
         bits::BitIteratorBE,
     };
@@ -1021,6 +1159,14 @@ mod test {
             let expected: Uint<4> = from_str_radix(&hex, 16);
             prop_assert_eq!(uint_from_hex, expected);
         });
+    }
+
+    #[test]
+    #[should_panic = "hex number is too large"]
+    fn from_str_hex_should_panic_on_overflow() {
+        let _ = from_str_hex::<4>(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0",
+        );
     }
 
     #[test]
@@ -1065,6 +1211,19 @@ mod test {
         let result =
             WideUint::<4>::new(dividend, Uint::<4>::ZERO).ct_rem(&divisor);
         assert_eq!(result, from_num!("216456157"));
+    }
+
+    #[test]
+    #[should_panic = "should not divide by zero"]
+    fn ct_rem_zero() {
+        let zero = Uint::<4>::ZERO;
+        let divisor = from_num!("375923422");
+        let result = WideUint::<4>::new(zero, zero).ct_rem(&divisor);
+        assert_eq!(result, zero);
+
+        let dividend = from_num!("43129923721897334698312931");
+        let divisor = zero;
+        let _ = WideUint::<4>::new(dividend, zero).ct_rem(&divisor);
     }
 
     #[test]
@@ -1114,9 +1273,13 @@ mod test {
         // edge case to make shift the number into all zeroes
         let expected = Uint::<4>::new([0, 0, 0, 0]);
         assert_eq!(num << (56 + 64 + 64 + 64), expected);
+    }
 
-        let expected = Uint::<4>::new([0, 0, 0, 0]);
-        assert_eq!(num << 1000, expected);
+    #[test]
+    #[should_panic = "attempt to shift left with overflow"]
+    fn shl_overflow_should_panic() {
+        let num = Uint::<4>::ONE;
+        let _ = num << (64 * 4);
     }
 
     #[test]
@@ -1136,9 +1299,37 @@ mod test {
         // edge case to make shift the number into all zeroes
         let expected = Uint::<4>::new([0, 0, 0, 0]);
         assert_eq!(num >> (2 + 64 + 64 + 64), expected);
+    }
 
-        let expected = Uint::<4>::new([0, 0, 0, 0]);
-        assert_eq!(num >> 1000, expected);
+    #[test]
+    #[should_panic = "attempt to shift right with overflow"]
+    fn shr_overflow_should_panic() {
+        let num = Uint::<4>::ONE;
+        let _ = num >> (64 * 4);
+    }
+
+    #[test]
+    fn shr_shl_edge_case() {
+        let num = Uint::<4>::ONE;
+        assert_eq!(num >> 0, num);
+        assert_eq!(num << 0, num);
+
+        let num = Uint::<4>::new([
+            0xffffffffffffffff,
+            0xffffffffffffffff,
+            0,
+            0xffffffffffffffff,
+        ]);
+
+        assert_eq!(
+            num >> 64,
+            Uint::<4>::new([0xffffffffffffffff, 0, 0xffffffffffffffff, 0])
+        );
+
+        assert_eq!(
+            num << 64,
+            Uint::<4>::new([0, 0xffffffffffffffff, 0xffffffffffffffff, 0])
+        );
     }
 
     #[test]
@@ -1154,5 +1345,60 @@ mod test {
         let low_part = element & low_part_mask;
         assert_eq!(high_part, U256::ONE);
         assert_eq!(low_part, low_part_mask);
+    }
+
+    #[cfg(feature = "ruint")]
+    mod ruint_conversion_test {
+        use super::*;
+
+        /// This macro generates property-based tests for bidirectional
+        /// conversions between [`ruint::Uint`] and [`Uint`] types.
+        ///
+        /// Each test verifies that round-trip conversions preserve the original
+        /// value: `ruint::Uint -> Uint -> ruint::Uint` should equal the
+        /// original value.
+        ///
+        /// The number of limbs is automatically calculated using
+        /// `usize::div_ceil(bits, Limb::BITS)`.
+        macro_rules! test_ruint_conversion {
+            ($test_name:ident, $uint_type:ident, $bits:expr) => {
+                #[test]
+                fn $test_name() {
+                    proptest!(|(value: ruint::Uint<$bits, { usize::div_ceil($bits, $crate::arithmetic::Limb::BITS as usize) }>)| {
+                        let uint_from_ruint: crate::arithmetic::uint::$uint_type = value.into();
+                        let expected: ruint::Uint<$bits, { usize::div_ceil($bits, $crate::arithmetic::Limb::BITS as usize) }> = uint_from_ruint.into();
+                        prop_assert_eq!(value, expected);
+                    });
+                }
+            };
+        }
+
+        test_ruint_conversion!(ruint_u64, U64, 64);
+        test_ruint_conversion!(ruint_u128, U128, 128);
+        test_ruint_conversion!(ruint_u256, U256, 256);
+    }
+
+    mod primitive_conversion_test {
+        use super::*;
+
+        macro_rules! test_uint_conversion {
+            ($test_name:ident, $type:ty) => {
+                #[test]
+                fn $test_name() {
+                    proptest!(|(expected_primitive_num: $type)| {
+                        let num: U256 = expected_primitive_num.into();
+                        let primitive_num: $type = num.into();
+                        assert_eq!(expected_primitive_num, primitive_num);
+                    });
+                }
+            };
+        }
+
+        test_uint_conversion!(uint_u8, u8);
+        test_uint_conversion!(uint_u16, u16);
+        test_uint_conversion!(uint_u32, u32);
+        test_uint_conversion!(uint_u64, u64);
+        test_uint_conversion!(uint_u128, u128);
+        test_uint_conversion!(uint_usize, usize);
     }
 }
